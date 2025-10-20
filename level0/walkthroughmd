@@ -1,0 +1,166 @@
+# Level0 - Walkthrough
+
+## Binary Analysis
+
+### 1. Basic Information
+```bash
+file level0
+# Output: ELF 32-bit LSB executable, Intel 80386, not stripped
+# Key info: 32-bit, has debug symbols
+```
+
+### 2. Initial Execution
+```bash
+./level0
+# Output: Segmentation fault (core dumped)
+# Conclusion: Program expects arguments
+
+./level0 test
+# Output: No !
+# Conclusion: Program validates input
+```
+
+### 3. GDB Analysis
+
+#### View functions
+```bash
+gdb level0
+(gdb) info functions
+```
+Find: `0x08048ec0  main`
+
+#### Disassemble main
+```bash
+(gdb) disas main
+```
+
+## Key Assembly Code
+
+### Part 1: Read argument and convert to integer
+```asm
+0x08048ec9: mov    0xc(%ebp),%eax    # Get argv
+0x08048ecc: add    $0x4,%eax         # Point to argv[1]
+0x08048ecf: mov    (%eax),%eax       # Load argv[1]
+0x08048ed4: call   0x8049710 <atoi>  # Convert to int
+```
+
+**C equivalent:**
+```c
+int number = atoi(argv[1]);
+```
+
+---
+
+### Part 2: Compare with magic number
+```asm
+0x08048ed9: cmp    $0x1a7,%eax       # Compare with 0x1a7
+0x08048ede: jne    0x8048f58         # Jump if NOT equal
+```
+
+**C equivalent:**
+```c
+if (number != 0x1a7) {
+    goto print_no;
+}
+```
+
+**Key discovery:** `0x1a7` in hex = **423** in decimal
+
+---
+
+### Part 3: If correct - Execute shell
+```asm
+0x08048ee0: movl   $0x80c5348,(%esp)  # Load "/bin/sh"
+0x08048ee7: call   0x8050bf0 <strdup> # Duplicate string
+0x08048ef8: call   0x8054680 <getegid> # Get effective GID
+0x08048f01: call   0x8054670 <geteuid> # Get effective UID
+0x08048f21: call   0x8054700 <setresgid> # Set GID to level1
+0x08048f3d: call   0x8054690 <setresuid> # Set UID to level1
+0x08048f51: call   0x8054640 <execv>  # Execute shell
+```
+
+**C equivalent:**
+```c
+char *shell = strdup("/bin/sh");
+gid_t gid = getegid();
+uid_t uid = geteuid();
+setresgid(gid, gid, gid);
+setresuid(uid, uid, uid);
+execv("/bin/sh", args);
+```
+
+---
+
+### Part 4: If incorrect - Print error
+```asm
+0x08048f58: ...
+0x08048f7b: call   0x804a230 <fwrite>  # Print "No !"
+```
+
+**C equivalent:**
+```c
+fwrite("No !", 1, 5, stderr);
+```
+
+
+
+
+## Vulnerability
+
+**Type:** Simple password check
+
+**Description:** The program compares user input with a hardcoded value (423). If the comparison succeeds, it executes a shell with elevated privileges (level1).
+
+---
+
+## Exploit
+
+### Convert hex to decimal
+```bash
+# 0x1a7 (hex) = 423 (decimal)
+python3 -c "print(0x1a7)"
+# Output: 423
+```
+
+### Execute with magic number
+```bash
+./level0 423
+```
+
+### Get the password
+```bash
+$ cat /home/user/level1/.pass
+
+1fe8a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
+
+$ exit
+```
+
+### Login to next level
+```bash
+su level1
+```
+
+
+## Reconstructed Source Code
+### See source.c
+
+
+
+## Summary
+
+```
+1. Program expects one numeric argument
+2. Converts it to integer with `atoi()`
+3. Compares with **423** (0x1a7 in hex)
+4. If match: spawns shell with level1 privileges
+5. If no match: prints "No !"
+```
+
+## **Solution:** 
+
+`./level0 423`
+
+    $ cat /home/user/level1/.pass
+
+1fe8a524fa4bec01ca4ea2a869af2a02260d4a7d5fe7e7c24d8617e6dca12d3a
